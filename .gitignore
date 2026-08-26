@@ -1,0 +1,14 @@
+# 사내 자료는 저장소에 넣지 않는다 (CLAUDE.md §0-4)
+/private/
+/사양서/
+/사양서 모음/
+*.xls
+*.xlsx
+*.xlsm
+# 색인은 사내에서 build_index.py 로 만든다 — 만든 결과도 넣지 않는다
+js/index-data.js
+
+.DS_Store
+__pycache__/
+*.pyc
+node_modules/
