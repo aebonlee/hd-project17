@@ -214,5 +214,124 @@ eq(L.respond(null, '호스').kind, 'none', '색인이 null 이어도 죽지 않�
 eq(L.search(IDX, '<script>').length, 0, '이상한 문자로 터지지 않는다');
 
 
+group('13. 동의어 — 못 찾았을 때만 쓴다');
+
+var SYN = [
+  rec('920101-00039', 'spec', { name: 'ANGLE;40X40X3T', model: 'ANGLE 40x40x3T',
+      use: '개선반 운영용 자재' }),
+  rec('920501-00663', 'spec', { name: 'PLATE,STEEL;FLAT BAR', model: 'FLAT BAR 19MM',
+      use: '치구 제작용' })
+];
+/* 사양서 품명은 영문인데 찾는 사람은 한글로 친다 */
+eq(L.search(SYN, '앵글').length, 1, '"앵글" 로 ANGLE 을 찾는다');
+eq(L.search(SYN, 'ㄱ형강').length, 1, '현장 용어 "ㄱ형강" 으로도 찾는다');
+eq(L.search(SYN, '평철').length, 1, '"평철" 로 FLAT BAR 를 찾는다');
+
+/* ★ 적은 대로 찾아지면 넓히지 않는다.
+ * 이게 없으면 '산소호스' 가 '호스' 로 넓혀져 온갖 호스가 다 나온다 —
+ * 좁히려고 길게 친 사람에게 정반대로 답하는 셈이다. 실제로 그렇게 만들었다가
+ * 기획서의 「산소호스 알려줘 → 한 건」 이 4건으로 늘어난 것을 보고 고쳤다. */
+eq(L.search(IDX, '산소호스').length, 1, '"산소호스" 는 여전히 한 건 (동의어로 넓히지 않는다)');
+eq(L.search(IDX, '호스').length, 2, '"호스" 는 두 건');
+var sets = L.wordSetsFor(IDX, ['산소호스']);
+eq(sets[0], ['산소호스'], '찾아지는 낱말은 넓히지 않는다');
+ok(L.wordSetsFor(SYN, ['앵글'])[0].length > 1, '못 찾는 낱말만 넓힌다');
+
+/* 이유에 동의어를 썼다는 사실을 밝힌다 — 왜 나왔는지 숨기지 않는다 */
+var why = L.matchReasons(SYN[0], 'ㄱ형강', SYN);
+ok(why[0].indexOf('같은 말') >= 0, '동의어로 걸렸으면 그렇게 적는다', why[0]);
+ok(L.matchReasons(IDX[0], '산소호스', IDX)[0].indexOf('같은 말') < 0,
+   '그대로 걸렸으면 동의어라고 적지 않는다');
+
+
+group('14. 결과 표 — 최대 5개, 선택 이유 포함');
+
+var ask2 = L.respond(IDX, '호스');
+eq(ask2.kind, 'ask', '여럿이면 표를 준다');
+ok(Array.isArray(ask2.rows), '표 줄이 있다');
+eq(ask2.rows.length, 2, '맞은 만큼만');
+var row = ask2.rows[0];
+['partNo', 'name', 'model', 'maker', 'use', 'reasons'].forEach(function (k) {
+  ok(k in row, '표에 ' + k + ' 칸이 있다');
+});
+ok(row.reasons.length > 0, '선택 이유가 비어 있지 않다');
+/* 이유는 지어낸 설명이 아니라 판정에 쓴 근거다 */
+ok(row.reasons[0].indexOf('「호스」') >= 0, '무엇이 어디서 맞았는지 적는다', row.reasons[0]);
+
+/* 다섯 개를 넘으면 잘라 내되 잘랐다고 말한다 */
+var many2 = [];
+for (var k = 0; k < 8; k++) many2.push(rec('42010' + k + '-0000' + k, 'spec',
+  { name: 'HOSE ' + k, model: '호스' + k + '형' }));
+var big = L.respond(many2, '호스');
+eq(big.rows.length, 5, '표는 다섯 줄까지');
+eq(big.shown, 5, '보여 준 수');
+eq(big.more, 3, '남은 수를 센다');
+/* 잘라 낸 사실을 숨기면 "다 봤다"고 착각한다 */
+ok(big.more > 0, '잘렸다는 사실이 결과에 남는다');
+eq(L.respond(IDX, '420108-02540').kind, 'sheet', '한 건이면 표가 아니라 사양서');
+
+
+group('15. 못 찾았을 때 대신 쳐 볼 말을 권한다');
+
+var none2 = L.respond(IDX, '건조기 호스');
+eq(none2.kind, 'none', '두 낱말 다 맞아야 하므로 없음');
+ok((none2.suggest || []).indexOf('호스') >= 0,
+   '한 낱말만 쳐 보라고 권한다', JSON.stringify(none2.suggest));
+/* 사용자가 이미 친 말을 권한다. 영문 동의어를 권하면 두 번 헛걸음이다 */
+var none3 = L.respond(SYN, '건조기 평철');
+ok((none3.suggest || []).indexOf('평철') >= 0, '친 말 그대로 권한다',
+   JSON.stringify(none3.suggest));
+
+/* 지어내지 않는다 — 색인에 실제로 있는 말만 권한다 */
+var none4 = L.respond(IDX, '유압커플러');
+(none4.suggest || []).forEach(function (w) {
+  ok(L.search(IDX, w).length > 0, '권한 말 "' + w + '" 은 실제로 찾힌다');
+});
+eq(L.respond([], '아무거나').suggest, [], '색인이 비면 권할 말도 없다');
+
+
+group('16. 최신화 — 무엇이 달라졌는지 말한다');
+
+function specFile(file, partNo, fields) {
+  var r = rec(partNo, 'spec', fields);
+  r.file = file;
+  return r;
+}
+var before = [
+  specFile('a.xlsx', '420108-02540', { name: 'HOSE,GAS', model: '산소호스-30m', maker: '시중품' }),
+  specFile('b.xlsx', '420103-00591', { name: 'HOSE,FUEL', model: '실리콘 고열호스' }),
+  specFile('c.xlsx', '101573-00018', { name: 'RUBBER,MAGNET' })
+];
+var after = [
+  specFile('a.xlsx', '420108-02540', { name: 'HOSE,GAS', model: '산소호스-50m', maker: '한별테크' }),
+  specFile('b.xlsx', '420103-00591', { name: 'HOSE,FUEL', model: '실리콘 고열호스' }),
+  specFile('d.xlsx', '420115-00042', { name: 'HOSE,AIR' })
+];
+var cmp = L.compareIndex(before, after);
+eq(L.compareSummary(cmp), { added: 1, changed: 1, same: 1, removed: 1 }, '신규·변경·동일·사라짐');
+eq(cmp.added[0].partNo, '420115-00042', '새 파일은 신규');
+eq(cmp.removed[0].partNo, '101573-00018', '없어진 파일은 사라짐 — 조용히 지우지 않는다');
+eq(cmp.same[0].partNo, '420103-00591', '안 바뀐 것은 동일');
+
+/* "뭔가 바뀐 것 같다"가 아니라 어느 칸이 무엇에서 무엇으로 바뀌었는지 */
+var ch = cmp.changed[0];
+eq(ch.diffs.length, 2, '바뀐 칸 수');
+ok(ch.reasons.some(function (r) { return r.indexOf('모델 및 규격 변경') >= 0; }),
+   '규격 변경을 짚는다', ch.reasons.join(' / '));
+ok(ch.reasons.some(function (r) { return r.indexOf('제조 Maker 변경') >= 0; }),
+   '메이커 변경을 짚는다');
+ok(ch.reasons[0].indexOf('→') >= 0, '무엇에서 무엇으로인지 적는다', ch.reasons[0]);
+
+/* 파일 기준으로 견준다 — 품번은 파일명과 내용이 어긋날 수 있다 */
+var moved = [specFile('a.xlsx', '999999-99999', { name: 'HOSE,GAS', model: '산소호스-30m', maker: '시중품' })];
+var cmp2 = L.compareIndex([before[0]], moved);
+eq(L.compareSummary(cmp2).changed, 1, '같은 파일에서 품번이 바뀌면 변경');
+ok(cmp2.changed[0].reasons[0].indexOf('품번 변경') >= 0, '품번이 바뀐 것도 짚는다');
+
+/* 빈 색인끼리 견줘도 죽지 않는다 */
+eq(L.compareSummary(L.compareIndex([], [])), { added: 0, changed: 0, same: 0, removed: 0 }, '빈 색인');
+eq(L.compareSummary(L.compareIndex(null, after)).added, 3, '이전 색인이 없으면 전부 신규');
+
+
 console.log('\n' + (failed ? 'X' : 'O') + ' ' + passed + ' 통과 / ' + failed + ' 실패');
 process.exit(failed ? 1 : 0);

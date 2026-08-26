@@ -87,6 +87,59 @@
     return PART_NO.test(String(q == null ? '' : q).trim());
   }
 
+  /* ── 동의어 · 현장 용어 ────────────────────────────────────────
+   *
+   * 사양서의 품명은 영문이고(`HOSE,GAS;OXYGEN TWIN`) 찾는 사람은 한글로 친다.
+   * 용도 칸에 한글이 있어 걸리는 경우가 많지만, 용도가 비어 있으면 못 찾는다.
+   *
+   * 오타도 실제로 들어 있다 — 실제 사양서에 `호일제단`(재단), `단품도장장`
+   * 이 그대로 적혀 있었다. 원본을 고치지 않는다는 원칙을 지키면서 찾히게
+   * 하려면, 고치는 대신 **같은 말로 취급**하는 수밖에 없다.
+   *
+   * 이 표는 손으로 채운다. 무엇을 채울지는 「못 찾은 검색어」 목록이 알려 준다.
+   * AI 로 자동 생성하지 않는 이유는, 틀린 동의어가 들어가면 엉뚱한 사양서가
+   * 검색되고 그것을 아무도 눈치채지 못하기 때문이다.
+   */
+  var SYNONYMS = [
+    ['호스', 'hose'],
+    ['앵글', 'angle', 'ㄱ형강', '기역형강'],
+    ['평철', 'flat bar', 'flatbar', '플랫바'],
+    ['철판', 'plate', '강판'],
+    ['자석', 'magnet', '마그넷'],
+    ['고무', 'rubber'],
+    ['우레탄', 'urethane'],
+    ['스티커', 'sticker', '라벨'],
+    ['필터', 'filter'],
+    ['브러시', 'brush', '브러쉬'],
+    ['패드', 'pad'],
+    ['창', 'window', '투시창'],
+    ['작업대', 'table', '테이블'],
+    ['송신기', 'remocon', 'transmitter', '리모컨'],
+    ['연료', 'fuel'],
+    ['산소', 'oxygen'],
+    ['공기', 'air', '에어'],
+    /* 실제 사양서에 있던 오타. 고치지 않고 같은 말로 본다. */
+    ['재단', '제단'],
+    ['도장', '도장장']
+  ];
+
+  /** 낱말 하나를 같은 뜻의 낱말들로 넓힌다. 자기 자신은 항상 포함한다. */
+  function expandTerm(term) {
+    var t = String(term == null ? '' : term).trim().toLowerCase();
+    if (!t) return [];
+    var out = [t];
+    for (var i = 0; i < SYNONYMS.length; i++) {
+      var group = SYNONYMS[i];
+      var hit = group.some(function (w) {
+        return t === w || (t.length > 1 && t.indexOf(w) >= 0) ||
+               (w.length > 1 && w.indexOf(t) >= 0);
+      });
+      if (!hit) continue;
+      group.forEach(function (w) { if (out.indexOf(w) < 0) out.push(w); });
+    }
+    return out;
+  }
+
   /* ── 검색 ──────────────────────────────────────────────────────── */
 
   function fieldValue(rec, key) {
@@ -95,30 +148,91 @@
     return (f && f.value) || '';
   }
 
+  /* 어느 칸에서 맞았는지에 따라 점수가 다르다. 품번 > 품명 > 모델 > 용도 > 나머지 */
+  var FIELD_WEIGHT = [
+    { key: 'partNo', score: 100, title: '품번' },
+    { key: 'name',   score: 40,  title: '품명' },
+    { key: 'model',  score: 30,  title: '모델·규격' },
+    { key: 'use',    score: 20,  title: '용도' },
+    { key: 'detail', score: 10,  title: '상세규격' },
+    { key: 'maker',  score: 10,  title: '제조사' },
+    { key: 'material', score: 10, title: '재질' },
+    { key: 'remark', score: 5,   title: '비고' },
+    { key: 'bg',     score: 5,   title: 'B G' }
+  ];
+
+  /**
+   * 한 낱말이 이 사양서의 어느 칸에서 맞았는지 찾는다.
+   * 맞은 칸과 **실제로 맞은 글자**를 함께 돌려준다 — 그것이 「선택 이유」가 된다.
+   * 이유를 지어내지 않고 판정에 쓴 근거를 그대로 적는 것이 핵심이다.
+   */
+  function matchTerm(rec, term, words) {
+    words = words || [String(term == null ? '' : term).trim().toLowerCase()];
+    for (var i = 0; i < FIELD_WEIGHT.length; i++) {
+      var f = FIELD_WEIGHT[i];
+      var hay = (f.key === 'partNo' ? (rec.partNo || '') : fieldValue(rec, f.key)).toLowerCase();
+      if (!hay) continue;
+      for (var j = 0; j < words.length; j++) {
+        if (hay.indexOf(words[j]) >= 0) {
+          return { field: f.key, title: f.title, score: f.score,
+                   word: words[j], viaSynonym: words[j] !== String(term).toLowerCase() };
+        }
+      }
+    }
+    return null;
+  }
+
   /** 한 건이 검색어를 얼마나 잘 맞추는가. 0 이면 안 맞은 것. */
-  function score(rec, terms) {
+  function score(rec, terms, wordSets) {
     if (!isSearchable(rec)) return 0;
     var total = 0;
     for (var i = 0; i < terms.length; i++) {
-      var t = terms[i].toLowerCase();
-      if (!t) continue;
-      var best = 0;
-      if ((rec.partNo || '').toLowerCase().indexOf(t) >= 0) best = 100;
-      if (!best && fieldValue(rec, 'name').toLowerCase().indexOf(t) >= 0) best = 40;
-      if (!best && fieldValue(rec, 'model').toLowerCase().indexOf(t) >= 0) best = 30;
-      if (!best && fieldValue(rec, 'use').toLowerCase().indexOf(t) >= 0) best = 20;
-      if (!best) {
-        var rest = ['detail', 'maker', 'material', 'remark', 'bg'];
-        for (var j = 0; j < rest.length; j++) {
-          if (fieldValue(rec, rest[j]).toLowerCase().indexOf(t) >= 0) { best = 10; break; }
-        }
-      }
+      var m = matchTerm(rec, terms[i], wordSets && wordSets[i]);
       /* 모든 낱말이 맞아야 한다. 하나라도 없으면 이 건은 탈락.
        * '산소 호스' 로 좁히려 한 사람에게 아무 호스나 내주지 않기 위해서다. */
-      if (!best) return 0;
-      total += best;
+      if (!m) return 0;
+      total += m.score;
     }
     return total;
+  }
+
+  /**
+   * 왜 이 사양서가 나왔는지. 화면의 「선택 이유」 칸에 그대로 들어간다.
+   * 판정에 쓴 근거이므로 설명과 실제 동작이 어긋날 수 없다.
+   */
+  /**
+   * 낱말마다 동의어를 쓸지 정한다.
+   *
+   * **적은 대로 찾아서 나오는 게 있으면 넓히지 않는다.** 이게 없으면
+   * `산소호스` 가 `호스` 로 넓혀져 온갖 호스가 다 나온다 — 좁히려고
+   * 길게 친 사람에게 정반대로 답하는 셈이다. 실제로 그렇게 만들었다가
+   * 기획서의 「산소호스 알려줘 → 한 건」 이 4건으로 늘어난 것을 보고 고쳤다.
+   *
+   * 동의어는 **못 찾았을 때의 마지막 수단**이다.
+   */
+  function wordSetsFor(index, terms) {
+    return terms.map(function (t) {
+      var literal = [String(t).trim().toLowerCase()];
+      var found = (index || []).some(function (r) {
+        return isSearchable(r) && matchTerm(r, t, literal);
+      });
+      return found ? literal : expandTerm(t);
+    });
+  }
+
+  function matchReasons(rec, query, index) {
+    var q = normalizeQuery(query);
+    if (isPartNo(q)) return ['품번이 정확히 일치합니다'];
+    var terms = q.split(/\s+/).filter(Boolean);
+    var sets = wordSetsFor(index, terms);
+    var out = [];
+    terms.forEach(function (t, i) {
+      var m = matchTerm(rec, t, sets[i]);
+      if (!m) return;
+      var via = m.viaSynonym ? ' (같은 말: ' + m.word + ')' : '';
+      out.push(m.title + '에 「' + t + '」' + via);
+    });
+    return out;
   }
 
   function search(index, query) {
@@ -130,9 +244,10 @@
       });
     }
     var terms = q.split(/\s+/).filter(Boolean);
+    var sets = wordSetsFor(index, terms);
     var hits = [];
     (index || []).forEach(function (r) {
-      var s = score(r, terms);
+      var s = score(r, terms, sets);
       if (s > 0) hits.push({ rec: r, score: s });
     });
     hits.sort(function (a, b) {
@@ -158,6 +273,65 @@
 
   /* 되묻을 때 이름을 몇 개까지 부를지. 넘으면 개수만 말하고 목록을 보여 준다. */
   var ASK_NAME_LIMIT = 4;
+
+  /* 한 번에 보여 줄 최대 건수. 기획서 요구(최대 5개). */
+  var TABLE_LIMIT = 5;
+
+  /** 표 한 줄. 기획서가 요구한 칸 그대로 — 품번·품명·규격·메이커·용도·선택 이유 */
+  function resultRow(rec, query, index) {
+    return {
+      partNo: rec.partNo,
+      name: fieldValue(rec, 'name').split('\n')[0],
+      model: fieldValue(rec, 'model').split('\n')[0],
+      maker: fieldValue(rec, 'maker'),
+      use: fieldValue(rec, 'use').replace(/\s*\n+\s*/g, ' ').trim(),
+      reasons: matchReasons(rec, query, index),
+      rec: rec
+    };
+  }
+
+  function resultRows(hits, query, index, limit) {
+    var n = limit || TABLE_LIMIT;
+    return hits.slice(0, n).map(function (r) { return resultRow(r, query, index); });
+  }
+
+  /**
+   * 못 찾았을 때 대신 쳐 볼 말을 제안한다(기획서 Format 5).
+   *
+   * 지어내지 않는다. **색인에 실제로 있는 말만** 제안한다 —
+   * 없는 말을 권하면 두 번 헛걸음시킨다.
+   */
+  function suggestions(index, query, limit) {
+    var q = normalizeQuery(query);
+    if (!q) return [];
+    var terms = q.split(/\s+/).filter(Boolean);
+    var out = [];
+
+    /* 권할 말인지 판정할 때 **검색과 똑같은 규칙**을 쓴다.
+     * 글자 그대로만 맞춰 보면 '평철' 을 권하지 못하고 'flat bar' 를 권한다 —
+     * 실제로는 '평철' 로 검색하면 나오는데도. 두 규칙이 어긋나면
+     * 시스템이 자기가 찾을 수 있는 말을 권하지 못한다. */
+    function works(w) {
+      if (!w || w.length < 2 || out.indexOf(w) >= 0) return false;
+      if (search(index, w).length === 0) return false;
+      out.push(w);
+      return true;
+    }
+
+    terms.forEach(function (t) {
+      /* ① 이 낱말 하나만 쳐도 나오는가.
+       *    '건조기 필터' 가 안 나온 것은 '건조기' 때문이지 '필터' 때문이 아니다. */
+      if (terms.length > 1 && works(t)) return;
+      /* ② 붙여 친 말을 짧게 잘라 본다 — '호일재단' → '호일' */
+      for (var len = t.length - 1; len >= 2; len--) {
+        if (works(t.slice(0, len))) return;
+      }
+      for (var st = 1; st <= t.length - 2; st++) {
+        if (works(t.slice(st))) return;
+      }
+    });
+    return out.slice(0, limit || 4);
+  }
 
   /**
    * 검색어 하나에 대한 답. 화면은 이 결과를 그리기만 한다.
@@ -202,7 +376,8 @@
                    '생산기술팀에 사양서 등록을 요청 하세요'
         };
       }
-      return { kind: 'none', query: q, message: NOT_FOUND };
+      return { kind: 'none', query: q, message: NOT_FOUND,
+               suggest: suggestions(index, query) };
     }
     if (hits.length === 1) return { kind: 'sheet', query: q, rec: hits[0] };
 
@@ -214,7 +389,12 @@
     } else {
       msg = hits.length + '건이 조회 되었습니다. 어떤 걸 찾으시나요?';
     }
-    return { kind: 'ask', query: q, hits: hits, message: msg };
+    return {
+      kind: 'ask', query: q, hits: hits, message: msg,
+      rows: resultRows(hits, query, index),
+      shown: Math.min(hits.length, TABLE_LIMIT),
+      more: Math.max(0, hits.length - TABLE_LIMIT)
+    };
   }
 
   /* ── 화면에 펼 때 ──────────────────────────────────────────────── */
@@ -260,6 +440,83 @@
       out.push('표준 사양서 양식이 아니라 구형 「부품 설명」 양식입니다. 일부 항목이 없습니다.');
     }
     return out;
+  }
+
+  /* ── 최신화 — 새 사양서와 기존 색인을 견준다 ──────────────────
+   *
+   * 색인을 다시 만들 때마다 무엇이 달라졌는지 알아야 한다.
+   * "뭔가 바뀐 것 같다"가 아니라 **어느 칸이 무엇에서 무엇으로** 바뀌었는지
+   * 말할 수 있어야, 그 변경이 맞는지 사람이 판단할 수 있다.
+   *
+   * 파일을 기준으로 견준다. 품번은 어긋날 수 있지만(파일명 ↔ 내용)
+   * 폴더 안에서 한 파일은 하나다.
+   */
+  var COMPARE_FIELDS = ['name', 'model', 'maker', 'use', 'material',
+                        'unit', 'qtyPerUnit', 'origin', 'detail', 'remark', 'bg'];
+
+  function byFile(index) {
+    var m = {};
+    (index || []).forEach(function (r) { if (r && r.file) m[r.file] = r; });
+    return m;
+  }
+
+  /**
+   * 한 건이 어떻게 달라졌는지. 빈 배열이면 같은 것이다.
+   * 값이 길면 잘라 적는다 — 표에 넣어야 하기 때문이다.
+   */
+  function diffRecord(before, after) {
+    var out = [];
+    function cut(v) {
+      v = String(v == null ? '' : v).replace(/\s*\n+\s*/g, ' ').trim();
+      return v.length > 40 ? v.slice(0, 40) + '…' : v;
+    }
+    if (before.partNo !== after.partNo) {
+      out.push({ field: 'partNo', title: '품번', from: before.partNo, to: after.partNo });
+    }
+    if (before.kind !== after.kind) {
+      out.push({ field: 'kind', title: '문서 종류', from: before.kind, to: after.kind });
+    }
+    COMPARE_FIELDS.forEach(function (k) {
+      var a = (before.fields && before.fields[k]) || { value: '', state: 'missing' };
+      var b = (after.fields && after.fields[k]) || { value: '', state: 'missing' };
+      if (a.value === b.value && a.state === b.state) return;
+      out.push({ field: k, title: FIELD_TITLE[k] || k,
+                 from: cut(a.value) || '(' + a.state + ')',
+                 to: cut(b.value) || '(' + b.state + ')' });
+    });
+    return out;
+  }
+
+  /** 변경 사유를 사람이 읽는 문장으로. "규격 변경: A → B" */
+  function changeReason(d) {
+    return d.title + ' 변경: ' + (d.from || '(없음)') + ' → ' + (d.to || '(없음)');
+  }
+
+  /**
+   * 기존 색인과 새 색인을 견준다.
+   *   added   신규 — 새로 생긴 파일
+   *   changed 변경 — 같은 파일인데 내용이 달라짐 (무엇이 달라졌는지 함께)
+   *   same    동일
+   *   removed 사라짐 — 폴더에서 없어진 파일. 지우지 말고 알린다
+   */
+  function compareIndex(before, after) {
+    var a = byFile(before), b = byFile(after);
+    var out = { added: [], changed: [], same: [], removed: [] };
+    (after || []).forEach(function (rec) {
+      var old = a[rec.file];
+      if (!old) { out.added.push(rec); return; }
+      var d = diffRecord(old, rec);
+      if (d.length) out.changed.push({ rec: rec, before: old, diffs: d,
+                                       reasons: d.map(changeReason) });
+      else out.same.push(rec);
+    });
+    Object.keys(a).forEach(function (f) { if (!b[f]) out.removed.push(a[f]); });
+    return out;
+  }
+
+  function compareSummary(cmp) {
+    return { added: cmp.added.length, changed: cmp.changed.length,
+             same: cmp.same.length, removed: cmp.removed.length };
   }
 
   /* ── 개인정보 ──────────────────────────────────────────────────── */
@@ -337,9 +594,15 @@
     isPartNo: isPartNo, isSearchable: isSearchable,
     normalizeQuery: normalizeQuery, stripTails: stripTails, stripParticle: stripParticle,
     score: score, search: search, respond: respond, nonSpecMatches: nonSpecMatches,
+    SYNONYMS: SYNONYMS, expandTerm: expandTerm, matchTerm: matchTerm,
+    matchReasons: matchReasons, wordSetsFor: wordSetsFor,
+    TABLE_LIMIT: TABLE_LIMIT, resultRow: resultRow, resultRows: resultRows,
+    suggestions: suggestions,
     shortLabel: shortLabel, joinKorean: joinKorean,
     fieldValue: fieldValue, fieldState: fieldState, sheetRows: sheetRows, warnings: warnings,
     maskContact: maskContact,
+    COMPARE_FIELDS: COMPARE_FIELDS, diffRecord: diffRecord, changeReason: changeReason,
+    compareIndex: compareIndex, compareSummary: compareSummary,
     todayLog: todayLog, missingQueries: missingQueries, summarize: summarize
   };
 }));
