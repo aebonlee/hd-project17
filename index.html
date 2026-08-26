@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>사양서 검색 — 부품 Spec. Sheet</title>
+<meta name="description" content="품번이나 '호스 검색해줘' 같은 말로 사내 부품 사양서를 찾아 화면에 펴 주는 검색 사이트">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="demo-banner">
+  <b>샘플 데이터입니다.</b>
+  품번 체계와 사양서 항목 구조는 실제를 따랐지만, 값과 사람 이름·연락처는 전부 지어낸 것입니다.
+  사내 실데이터는 이 저장소에 들어 있지 않습니다.
+</div>
+
+<!-- ═══════════════ 검색 ═══════════════ -->
+<main class="stage" id="stage">
+  <header class="brand">
+    <h1>사양서 검색</h1>
+    <p class="sub">품번을 알면 품번으로, 모르면 <b>“호스 검색해줘”</b> 처럼 물어보세요.</p>
+  </header>
+
+  <form class="searchbar" id="searchForm" autocomplete="off">
+    <input type="text" id="q" placeholder="420108-02540  ·  호스 검색해줘  ·  산소용접기"
+           aria-label="검색어">
+    <button type="submit" id="btnGo">검색</button>
+  </form>
+
+  <div class="examples" id="examples">
+    <span>예시</span>
+    <button type="button" data-ex="420108-02540">420108-02540</button>
+    <button type="button" data-ex="호스 검색해줘">호스 검색해줘</button>
+    <button type="button" data-ex="산소호스 알려줘">산소호스 알려줘</button>
+    <button type="button" data-ex="건조기 필터">건조기 필터</button>
+  </div>
+
+  <div class="answer" id="answer" aria-live="polite"></div>
+</main>
+
+<!-- ═══════════════ 오늘 검색 기록 (작은 창) ═══════════════ -->
+<aside class="logpane" id="logpane">
+  <button class="logtab" id="logTab" aria-expanded="false">
+    오늘 검색 <span class="cnt" id="logCount">0</span>
+  </button>
+  <div class="logbody" id="logBody" hidden>
+    <div class="logsum" id="logSum"></div>
+    <div class="logsec">
+      <h3>등록이 필요한 검색어</h3>
+      <p class="hint">못 찾은 검색어입니다. 생산기술팀에 등록을 요청할 목록입니다.</p>
+      <ul id="logMissing" class="loglist missing"></ul>
+    </div>
+    <div class="logsec">
+      <h3>오늘 검색한 것</h3>
+      <ul id="logList" class="loglist"></ul>
+    </div>
+    <div class="logfoot">
+      <button type="button" id="btnCopyMissing">등록 요청 목록 복사</button>
+      <button type="button" id="btnClearLog" class="ghost">기록 비우기</button>
+    </div>
+  </div>
+</aside>
+
+<footer class="foot">
+  <span id="idxInfo"></span>
+  <a href="https://github.com/aebonlee/hd-project17" target="_new" rel="noopener noreferrer">저장소</a>
+</footer>
+
+<script src="js/logic.js"></script>
+<script src="js/seed-data.js"></script>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

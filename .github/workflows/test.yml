@@ -1,0 +1,54 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 파이썬 의존성
+        run: pip install --quiet openpyxl xlrd
+
+      - name: 규칙 테스트 (검색)
+        run: node test/logic.test.js
+
+      - name: 저장소 테스트 (데모)
+        run: node test/store.test.js
+
+      - name: 서버 어댑터 테스트
+        run: node test/server.test.js
+
+      - name: 엑셀 파싱 규칙 테스트
+        run: python3 test/test_build_index.py
+
+      - name: 샘플 데이터가 최신인가
+        # gen-seed.py 를 고치고 seed-data.js 를 다시 만들지 않으면
+        # 화면과 테스트가 서로 다른 데이터를 보게 된다.
+        run: |
+          python3 scripts/gen-seed.py
+          git diff --exit-code js/seed-data.js
+
+      - name: playwright 설치
+        run: npm install --no-save playwright && npx playwright install --with-deps chromium
+
+      - name: 화면 연기 테스트
+        run: node test/smoke.browser.js
+
+      # 러너에는 PostgreSQL 이 깔려 있지만 서비스가 꺼져 있고 initdb 가 PATH 에 없다.
+      # run.sh 가 /usr/lib/postgresql/*/bin 도 뒤지므로 그대로 돈다.
+      # (initdb 는 root 로 못 돈다. 러너는 root 가 아니라 문제가 없다.)
+      - name: SQL 검증 (임시 PostgreSQL 에 schema.sql 적용)
+        run: ./scripts/sqltest/run.sh
