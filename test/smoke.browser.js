@@ -80,18 +80,39 @@ function serve(port) {
     ok((await page.textContent('.sheet-foot')).indexOf('.xlsx') >= 0, '원본 파일 이름을 알려 준다');
     ok(await page.locator('.stage.center').count() === 0, '결과가 나오면 검색창이 위로 붙는다');
 
-    group('3. 되묻기 — 골라 주지 않는다');
+    group('3. 되묻기 — 표로 보여 주되 골라 주지 않는다');
     await page.fill('#q', '호스 검색해줘');
     await page.click('#btnGo');
     await page.waitForSelector('.msg.ask');
     var askMsg = await page.textContent('.msg.ask');
     ok(askMsg.indexOf('어떤 걸 찾으시나요') >= 0, '되묻는 말이 나온다', askMsg);
-    var choices = await page.locator('.choices button').count();
-    ok(choices >= 2, '후보를 눌러 고를 수 있다 (' + choices + '개)');
     ok(await page.locator('#answer .sheet').count() === 0, '되물을 때는 사양서를 펴지 않는다');
 
+    /* 기획서 Format: 표 형식 필수 · 품번/품명/규격/메이커/용도/선택 이유 */
+    await page.waitForSelector('table.results');
+    var heads = await page.$$eval('table.results thead th',
+      function (els) { return els.map(function (e) { return e.textContent.trim(); }); });
+    ['품번', '품명', '규격 · 모델', '메이커', '용도', '선택 이유'].forEach(function (h) {
+      ok(heads.indexOf(h) >= 0, '표에 「' + h + '」 칸이 있다', JSON.stringify(heads));
+    });
+    var rows = await page.locator('table.results tbody tr').count();
+    ok(rows >= 2 && rows <= 5, '표가 2~5줄이다 (' + rows + '줄)');
+
+    /* 선택 이유는 지어낸 설명이 아니라 판정 근거다 */
+    var whys = await page.$$eval('table.results .why',
+      function (els) { return els.map(function (e) { return e.textContent.trim(); }); });
+    ok(whys.every(function (w) { return w && w !== '-'; }), '모든 줄에 선택 이유가 있다',
+       JSON.stringify(whys));
+    ok(whys[0].indexOf('호스') >= 0, '무엇이 맞았는지 적는다', whys[0]);
+
+    /* 표가 한 글자씩 접히지 않는지 — 폭이 없는 칸에 긴 글을 넣으면 실제로 그랬다 */
+    var rowH = await page.$$eval('table.results tbody tr',
+      function (els) { return els.map(function (e) { return e.getBoundingClientRect().height; }); });
+    ok(rowH.every(function (h) { return h < 120; }), '표 줄이 세로로 접히지 않는다',
+       JSON.stringify(rowH));
+
     /* 후보를 누르면 그 사양서로 간다 — 기획서의 2번 시나리오 */
-    await page.click('.choices button[data-pn="420108-02540"]');
+    await page.click('table.results button[data-pn="420108-02540"]');
     await page.waitForSelector('#answer .sheet');
     eq(await page.textContent('.sheet-head .pn'), '420108-02540', '고른 사양서가 펴진다');
 
@@ -104,12 +125,25 @@ function serve(port) {
        '저장 되어있는 파일이 없습니다. 내용을 재확인 하거나 생산기술팀에 사양서 등록을 요청 하세요',
        '문구가 기획서와 한 글자도 다르지 않다');
 
+    /* 기획서 Format 5: 결과 없을 때 검색 키워드 제안 */
+    await page.fill('#q', '건조기 필터');
+    await page.click('#btnGo');
+    await page.waitForSelector('.msg.none');
+    ok(await page.locator('.suggest button').count() > 0, '대신 쳐 볼 말을 권한다');
+    var sug = (await page.textContent('.suggest')).trim();
+    ok(sug.indexOf('필터') >= 0, '사용자가 친 말을 권한다', sug);
+    /* 권한 말을 누르면 실제로 찾힌다 — 지어낸 말을 권하지 않는다 */
+    await page.click('.suggest button');
+    await page.waitForTimeout(200);
+    ok(await page.locator('#answer .msg.none').count() === 0,
+       '권한 말로 검색하면 결과가 나온다');
+
     group('5. 오늘 검색 기록 창');
-    eq(await page.textContent('#logCount'), '4', '검색한 횟수가 세어진다');
+    eq(await page.textContent('#logCount'), '6', '검색한 횟수가 세어진다');
     await page.click('#logTab');
     await page.waitForSelector('#logBody:not([hidden])');
     var sum = await page.textContent('#logSum');
-    ok(sum.indexOf('4') >= 0, '오늘 요약이 보인다', sum);
+    ok(sum.indexOf('6') >= 0, '오늘 요약이 보인다', sum);
     var missing = await page.textContent('#logMissing');
     ok(missing.indexOf('건조기 필터') >= 0, '못 찾은 검색어가 목록에 오른다', missing);
     var list = await page.textContent('#logList');
@@ -119,7 +153,7 @@ function serve(port) {
      * 그러면 "오늘 몇 번 찾았나"가 눌러 본 횟수만큼 부풀어 오른다 */
     await page.click('#logList button[data-q="건조기 필터"]');
     await page.waitForTimeout(150);
-    eq(await page.textContent('#logCount'), '4', '기록을 눌러 봐도 횟수가 늘지 않는다');
+    eq(await page.textContent('#logCount'), '6', '기록을 눌러 봐도 횟수가 늘지 않는다');
 
     group('6. 예시 단추');
     await page.click('.examples button[data-ex="산소호스 알려줘"]');
