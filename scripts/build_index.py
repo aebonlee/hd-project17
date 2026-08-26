@@ -214,6 +214,76 @@ def parse(path):
     return rec
 
 
+# ─────────────────────────────────────────── 최신화 비교
+#
+# 색인을 다시 만들 때 무엇이 달라졌는지 말한다.
+# "뭔가 바뀐 것 같다"가 아니라 **어느 칸이 무엇에서 무엇으로** 바뀌었는지
+# 말할 수 있어야, 그 변경이 맞는지 사람이 판단할 수 있다.
+#
+# ⚠ js/logic.js 의 compareIndex() 와 **같은 규칙**이다. 한쪽만 고치지 말 것.
+COMPARE_FIELDS = ['name', 'model', 'maker', 'use', 'material',
+                  'unit', 'qtyPerUnit', 'origin', 'detail', 'remark', 'bg']
+
+
+def _cut(v, n=40):
+    v = re.sub(r'\s*\n+\s*', ' ', str(v or '')).strip()
+    return v[:n] + '…' if len(v) > n else v
+
+
+def diff_record(before, after):
+    out = []
+    if before.get('partNo') != after.get('partNo'):
+        out.append(('품번', before.get('partNo', ''), after.get('partNo', '')))
+    if before.get('kind') != after.get('kind'):
+        out.append(('문서 종류', before.get('kind', ''), after.get('kind', '')))
+    for k in COMPARE_FIELDS:
+        a = (before.get('fields') or {}).get(k) or {'value': '', 'state': 'missing'}
+        b = (after.get('fields') or {}).get(k) or {'value': '', 'state': 'missing'}
+        if a.get('value') == b.get('value') and a.get('state') == b.get('state'):
+            continue
+        out.append((FIELD_TITLE.get(k, k),
+                    _cut(a.get('value')) or '(%s)' % a.get('state'),
+                    _cut(b.get('value')) or '(%s)' % b.get('state')))
+    return out
+
+
+def compare_index(before, after):
+    a = {r['file']: r for r in before if r.get('file')}
+    b = {r['file']: r for r in after if r.get('file')}
+    out = {'added': [], 'changed': [], 'same': [], 'removed': []}
+    for rec in after:
+        old = a.get(rec.get('file'))
+        if old is None:
+            out['added'].append(rec)
+            continue
+        d = diff_record(old, rec)
+        if d:
+            out['changed'].append((rec, d))
+        else:
+            out['same'].append(rec)
+    for f, rec in a.items():
+        if f not in b:
+            out['removed'].append(rec)
+    return out
+
+
+def print_compare(cmp):
+    print('')
+    print('최신화 비교 — 신규 %d · 변경 %d · 동일 %d · 사라짐 %d' % (
+        len(cmp['added']), len(cmp['changed']), len(cmp['same']), len(cmp['removed'])))
+    for rec in cmp['added']:
+        print('  [신규]   %s  %s' % (rec.get('partNo', '?'), rec.get('file', '')))
+    for rec, diffs in cmp['changed']:
+        print('  [변경]   %s  %s' % (rec.get('partNo', '?'), rec.get('file', '')))
+        for title, a, b in diffs:
+            print('           · %s 변경: %s → %s' % (title, a or '(없음)', b or '(없음)'))
+    for rec in cmp['removed']:
+        # 지우지 않고 알린다. 파일을 옮겼을 수도 있고 실수로 지웠을 수도 있다.
+        print('  [사라짐] %s  %s' % (rec.get('partNo', '?'), rec.get('file', '')))
+    if not (cmp['added'] or cmp['changed'] or cmp['removed']):
+        print('  달라진 것이 없습니다.')
+
+
 # ─────────────────────────────────────────── 실행
 def walk(folder):
     out = []
@@ -236,6 +306,8 @@ def main(argv=None):
     ap.add_argument('folder', help='사양서가 들어 있는 폴더')
     ap.add_argument('-o', '--out', default='js/index-data.js')
     ap.add_argument('--json', action='store_true', help='JS 대신 순수 JSON 으로')
+    ap.add_argument('--compare', metavar='이전색인.json',
+                    help='기존 색인과 견줘 신규/변경/동일을 알려 준다')
     a = ap.parse_args(argv)
 
     recs = walk(a.folder)
@@ -258,6 +330,15 @@ def main(argv=None):
         print('  ⚠ 파일명과 내용의 품번이 다른 파일 %d 건:' % len(conflict))
         for r in conflict:
             print('     %s' % r['file'])
+    if a.compare:
+        try:
+            with open(a.compare, encoding='utf-8') as f:
+                before = json.load(f)
+        except Exception as e:
+            print('  ⚠ 이전 색인을 읽지 못했습니다: %s' % e)
+        else:
+            print_compare(compare_index(before, recs))
+
     not_spec = [r for r in recs if r['kind'] not in ('spec', 'desc')]
     if not_spec:
         print('  ⚠ 사양서가 아닌 파일 %d 건 (검색 결과로 내주지 않습니다):' % len(not_spec))

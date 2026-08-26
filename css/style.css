@@ -43,6 +43,9 @@ b{font-weight:650}
   justify-content:flex-start;
 }
 .stage.center{ justify-content:center; min-height:78vh; }
+/* 표를 보여 줄 때만 본문을 넓힌다. 검색창 하나만 있을 때 넓으면 허전하고,
+   표가 나왔을 때 좁으면 「선택 이유」가 화면 밖으로 밀린다. */
+.stage.wide{ max-width:1140px; }
 
 .brand{ text-align:center; margin:56px 0 22px; }
 .stage.center .brand{ margin-top:0; }
@@ -199,3 +202,37 @@ b{font-weight:650}
   .logpane{ right:8px; bottom:8px; }
   .foot{ display:none; }
 }
+
+/* ── 결과 표 (기획서 Format: 최대 5개 · 표 필수 · 선택 이유) ── */
+.tablewrap{ margin-top:12px; overflow-x:auto; }
+.results{
+  /* 표를 폭 100% 에 욱여넣으면 글이 든 칸이 한 글자씩 접혀 표가 문단처럼 보인다.
+     내용만큼 넓히고(min-width) 넘치면 감싼 상자를 가로로 굴린다. */
+  width:100%; min-width:860px; border-collapse:collapse; font-size:13px;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+}
+.results th,.results td{
+  border-bottom:1px solid var(--line2); padding:9px 12px; text-align:left;
+  vertical-align:top; white-space:nowrap;
+}
+.results thead th{ background:var(--line2); color:var(--ink2); font-weight:600; font-size:12px; }
+.results tr:last-child td{ border-bottom:0; }
+.results .pn{ font-variant-numeric:tabular-nums; font-weight:600; }
+.results .use,.results .why{ white-space:normal; }
+.results .use{ min-width:220px; max-width:320px; }
+.results .why{ min-width:170px; max-width:250px; color:var(--ink2); font-size:12px; }
+.results td button{
+  font:inherit; font-size:12px; cursor:pointer; color:var(--accent);
+  background:var(--surface); border:1px solid var(--line); border-radius:7px; padding:4px 10px;
+}
+.results td button:hover{ border-color:var(--accent); }
+
+.cut{ margin:8px 2px 0; font-size:12px; color:var(--muted); }
+
+.suggest{ margin:12px 2px 0; font-size:13px; color:var(--ink2); }
+.suggest button{
+  font:inherit; font-size:13px; cursor:pointer; color:var(--accent);
+  background:var(--surface); border:1px solid var(--line); border-radius:999px;
+  padding:4px 12px; margin:0 2px;
+}
+.suggest button:hover{ border-color:var(--accent); }

@@ -137,5 +137,61 @@ for key, _t, _a in B.FIELDS:
     ok(v is None and s == 'missing', '빈 시트에서 %s 는 missing' % key)
 
 
+group('10. 최신화 — 무엇이 달라졌는지 말한다')
+
+
+def spec(file, part_no, **fields):
+    f = {k: {'value': v, 'state': 'filled' if v else 'blank'} for k, v in fields.items()}
+    return {'partNo': part_no, 'partNoSource': 'body', 'kind': 'spec',
+            'file': file, 'sheet': '부품사양서', 'fields': f}
+
+
+before = [
+    spec('a.xlsx', '420108-02540', name='HOSE,GAS', model='산소호스-30m', maker='시중품'),
+    spec('b.xlsx', '420103-00591', name='HOSE,FUEL', model='실리콘 고열호스'),
+    spec('c.xlsx', '101573-00018', name='RUBBER,MAGNET'),
+]
+after = [
+    spec('a.xlsx', '420108-02540', name='HOSE,GAS', model='산소호스-50m', maker='한별테크'),
+    spec('b.xlsx', '420103-00591', name='HOSE,FUEL', model='실리콘 고열호스'),
+    spec('d.xlsx', '420115-00042', name='HOSE,AIR'),
+]
+cmp = B.compare_index(before, after)
+eq(len(cmp['added']), 1, '새 파일은 신규')
+eq(len(cmp['changed']), 1, '내용이 달라진 파일은 변경')
+eq(len(cmp['same']), 1, '안 바뀐 것은 동일')
+eq(len(cmp['removed']), 1, '없어진 파일은 사라짐 — 조용히 지우지 않는다')
+
+rec, diffs = cmp['changed'][0]
+eq(len(diffs), 2, '바뀐 칸 수')
+titles = [d[0] for d in diffs]
+ok('모델 및 규격' in titles, '규격 변경을 짚는다', str(titles))
+ok('제조 Maker' in titles, '메이커 변경을 짚는다', str(titles))
+# "뭔가 바뀐 것 같다"가 아니라 무엇에서 무엇으로인지 알아야 판단할 수 있다
+d = [x for x in diffs if x[0] == '모델 및 규격'][0]
+eq((d[1], d[2]), ('산소호스-30m', '산소호스-50m'), '무엇에서 무엇으로인지 적는다')
+
+# 파일 기준으로 견준다 — 품번은 파일명과 내용이 어긋날 수 있다
+moved = [spec('a.xlsx', '999999-99999', name='HOSE,GAS', model='산소호스-30m', maker='시중품')]
+cmp2 = B.compare_index([before[0]], moved)
+eq(len(cmp2['changed']), 1, '같은 파일에서 품번이 바뀌면 변경')
+ok('품번' in [x[0] for x in cmp2['changed'][0][1]], '품번이 바뀐 것도 짚는다')
+
+# 긴 값은 잘라 적는다 (표에 넣어야 하므로) — 다만 잘랐다는 표시를 남긴다
+long_before = [spec('x.xlsx', '420108-02540', use='가' * 80)]
+long_after = [spec('x.xlsx', '420108-02540', use='나' * 80)]
+d2 = B.compare_index(long_before, long_after)['changed'][0][1][0]
+ok(len(d2[1]) <= 45, '긴 값은 잘라 적는다', d2[1])
+ok(d2[1].endswith('…'), '잘랐다는 표시를 남긴다', d2[1])
+
+eq(B.compare_index([], []), {'added': [], 'changed': [], 'same': [], 'removed': []}, '빈 색인')
+eq(len(B.compare_index([], after)['added']), 3, '이전 색인이 없으면 전부 신규')
+
+# 상태만 바뀌어도(blank → filled) 변경이다
+st_a = [spec('y.xlsx', '420108-02540', material='')]
+st_b = [spec('y.xlsx', '420108-02540', material='고무')]
+eq(len(B.compare_index(st_a, st_b)['changed']), 1, '빈칸이 채워진 것도 변경')
+
+
 print('\n%s %d 통과 / %d 실패' % ('O' if not failed else 'X', passed, failed))
 sys.exit(1 if failed else 0)
